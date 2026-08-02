@@ -102,7 +102,7 @@ $PREFIX/lib/codegraph-termux/
 | Script                | Purpose |
 | Script                | Purpose |
 |-----------------------|---------|
-| `make all VER=… PKG=pacman` | full pipeline: produce → stage → package (pacman default on this system) |
+| `make all VER=… PKG=pacman` | full pipeline: produce → stage → package (both — pacman (pkg.tar.xz) + deb (optional)) |
 | `tools/produce-local.sh` | resolve version (or `CODEGRAPH_TARBALL=…`) → download → extract → `patchelf` node → cache in `~/.cache/codegraph-termux/` |
 | `scripts/build.sh`    | stage a relocatable prefix under `artifacts/staged/` (wrapper compiles with relative self-detection) |
 | `scripts/compile-wrapper.sh` | compile `codegraph-wrapper.c` with the four `-D` paths baked in |
