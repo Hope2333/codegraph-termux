@@ -1,0 +1,25 @@
+# build artifacts
+scripts/codegraph-wrapper
+
+# downloads / install temp
+*.tar.gz
+*.tgz
+*.deb
+*.pkg.tar.xz
+tmp/
+artifacts/
+downloads/
+
+# codegraph runtime data
+.codegraph/
+
+# editor / OS noise
+*.swp
+.DS_Store
+
+# packaged outputs
+packing/
+*.pkg.tar.*
+packaging/dpkg/work/
+packaging/pacman/pkg/
+packaging/pacman/src/

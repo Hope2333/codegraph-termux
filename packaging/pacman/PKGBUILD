@@ -1,0 +1,56 @@
+# Maintainer: Hope2333(幽零小喵) <u0catmiao@proton.me>
+pkgname=codegraph
+pkgver=1.5.0
+pkgrel=1
+pkgdesc='CodeGraph for Termux from local staged prefix — local-first code intelligence (MCP)'
+arch=('aarch64')
+url='https://github.com/colbymchenry/codegraph'
+license=('MIT')
+options=('!strip' '!debug')
+
+makedepends=()
+source=()
+sha256sums=()
+
+_prefix="${PREFIX:-/data/data/com.termux/files/usr}"
+_repo_root="${REPO_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+_staged_prefix="${STAGED_PREFIX:-${_repo_root}/artifacts/staged/prefix}"
+
+prepare() {
+  [[ -x "${_staged_prefix}/lib/codegraph-termux/current/node" ]] || {
+    error "missing runtime at ${_staged_prefix}/lib/codegraph-termux/current/node"
+    return 1
+  }
+  [[ -x "${_staged_prefix}/bin/codegraph" ]] || {
+    error "missing wrapper at ${_staged_prefix}/bin/codegraph"
+    return 1
+  }
+}
+
+build() {
+  true
+}
+
+package() {
+  mkdir -p "$pkgdir${_prefix}"
+  cp -a "${_staged_prefix}/." "$pkgdir${_prefix}/"
+}
+
+post_install() {
+  echo "CodeGraph for Termux installed"
+  echo "Run: codegraph init  (in your project) then: codegraph index"
+  echo "Runtime: glibc node (patchelf interpreter) via proot CPU fakes"
+  echo "If os.cpus() reports 0 cores: pkg install proot"
+}
+
+post_upgrade() {
+  true
+}
+
+pre_remove() {
+  true
+}
+
+post_remove() {
+  echo "CodeGraph for Termux removed"
+}
