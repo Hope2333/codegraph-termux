@@ -73,11 +73,11 @@ all: clean runtime stage
 	@V="$(VER)"; \
 	if [ "$$V" = "latest" ]; then V=""; fi; \
 	if [ "$(PKG)" = "deb" ]; then \
-		$(MAKE) deb VERSION=$$V; \
+		$(MAKE) deb VERSION=$$V PKG=deb MIX='$(MIX)' ODIR='$(ODIR)'; \
 	elif [ "$(PKG)" = "pacman" ]; then \
-		$(MAKE) pacman VERSION=$$V; \
+		$(MAKE) pacman VERSION=$$V PKG=pacman MIX='$(MIX)' ODIR='$(ODIR)'; \
 	else \
-		$(MAKE) pacman VERSION=$$V && $(MAKE) deb VERSION=$$V; \
+		$(MAKE) pacman VERSION=$$V PKG=pacman MIX='$(MIX)' ODIR='$(ODIR)' && $(MAKE) deb VERSION=$$V PKG=deb MIX='$(MIX)' ODIR='$(ODIR)'; \
 	fi
 
 batch:
