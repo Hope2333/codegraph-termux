@@ -111,21 +111,25 @@ stage:
 	./scripts/build.sh
 
 pacman:
-	rm -rf packaging/pacman/pkg packaging/pacman/src
+	rm -rf packing/pacman/pkg packing/pacman/src
 	PACKAGER_NAME='$(PACKAGER_NAME)' VERSION='$(VERSION)' ./scripts/package/package_pacman.sh
-	@if [ "$(MIX)" = "1" ]; then \
-		mkdir -p "$(OUTPUT_ROOT)" && cp -f packaging/pacman/codegraph-*.pkg.* "$(OUTPUT_ROOT)/"; \
-	else \
-		mkdir -p "$(OUTPUT_ROOT)/pacman" && cp -f packaging/pacman/codegraph-*.pkg.* "$(OUTPUT_ROOT)/pacman/"; \
+	@if [ "$(OUTPUT_ROOT)" != "$(CURDIR)/packing" ]; then \
+		if [ "$(MIX)" = "1" ]; then \
+			mkdir -p "$(OUTPUT_ROOT)" && cp -f packing/pacman/codegraph-*.pkg.* "$(OUTPUT_ROOT)/"; \
+		else \
+			mkdir -p "$(OUTPUT_ROOT)/pacman" && cp -f packing/pacman/codegraph-*.pkg.* "$(OUTPUT_ROOT)/pacman/"; \
+		fi; \
 	fi
 
 deb:
-	rm -rf packaging/dpkg/work
+	rm -rf packing/dpkg/work
 	MAINTAINER='$(PACKAGER_NAME)' VERSION='$(VERSION)' ./scripts/package/package_deb.sh
-	@if [ "$(MIX)" = "1" ]; then \
-		mkdir -p "$(OUTPUT_ROOT)" && cp -f packaging/dpkg/codegraph_*.deb "$(OUTPUT_ROOT)/"; \
-	else \
-		mkdir -p "$(OUTPUT_ROOT)/deb" && cp -f packaging/dpkg/codegraph_*.deb "$(OUTPUT_ROOT)/deb/"; \
+	@if [ "$(OUTPUT_ROOT)" != "$(CURDIR)/packing" ]; then \
+		if [ "$(MIX)" = "1" ]; then \
+			mkdir -p "$(OUTPUT_ROOT)" && cp -f packing/dpkg/codegraph_*.deb "$(OUTPUT_ROOT)/"; \
+		else \
+			mkdir -p "$(OUTPUT_ROOT)/deb" && cp -f packing/dpkg/codegraph_*.deb "$(OUTPUT_ROOT)/deb/"; \
+		fi \
 	fi
 
 status:
@@ -140,7 +144,7 @@ test:
 	bash scripts/test.sh
 
 clean:
-	rm -rf artifacts/staged packaging/dpkg/work packaging/pacman/pkg packaging/pacman/src
+	rm -rf artifacts/staged packing/dpkg/work packing/pacman/pkg packing/pacman/src
 	@echo "Clean complete"
 
 # ── Release upload (not shown in help) ──────────────────────────────────

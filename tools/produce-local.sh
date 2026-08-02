@@ -67,7 +67,7 @@ if cached_ok; then
 	log "cache hit: $CACHE_BUNDLE"
 	rm -rf "$RUNTIME_OUT"
 	cp -a "$CACHE_BUNDLE" "$RUNTIME_OUT"
-	rm -rf "$ROOT_DIR/artifacts/staged" "$ROOT_DIR/packaging/dpkg/work" "$ROOT_DIR/packaging/pacman/src"
+	rm -rf "$ROOT_DIR/artifacts/staged" "$ROOT_DIR/packing/dpkg/work" "$ROOT_DIR/packing/pacman/src"
 	log "DONE"
 	exit 0
 fi
@@ -101,5 +101,5 @@ mkdir -p "$CACHE_DIR"
 cp -a "$RAW" "$CACHE_BUNDLE"
 log "runtime ready: $RUNTIME_OUT"
 
-rm -rf "$ROOT_DIR/artifacts/staged" "$ROOT_DIR/packaging/dpkg/work" "$ROOT_DIR/packaging/pacman/src"
+rm -rf "$ROOT_DIR/artifacts/staged" "$ROOT_DIR/packing/dpkg/work" "$ROOT_DIR/packing/pacman/src"
 log "DONE"

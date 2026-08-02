@@ -18,8 +18,7 @@ downloads/
 .DS_Store
 
 # packaged outputs
-packing/
 *.pkg.tar.*
-packaging/dpkg/work/
-packaging/pacman/pkg/
-packaging/pacman/src/
+packing/dpkg/work/
+packing/pacman/pkg/
+packing/pacman/src/

@@ -107,7 +107,7 @@ $PREFIX/lib/codegraph-termux/
 | `scripts/build.sh`    | stage a relocatable prefix under `artifacts/staged/` (wrapper compiles with relative self-detection) |
 | `scripts/compile-wrapper.sh` | compile `codegraph-wrapper.c` with the four `-D` paths baked in |
 | `scripts/install.sh`  | one-shot: resolve → download → extract → patch → compile wrapper → symlink `current` → smoke test |
-| `scripts/package/package_pacman.sh` | `makepkg` with `packaging/pacman/PKGBUILD` → `packing/pacman/codegraph-*.pkg.tar.*` |
+| `scripts/package/package_pacman.sh` | `makepkg` with `packing/pacman/PKGBUILD` → `packing/pacman/codegraph-*.pkg.tar.*` |
 | `scripts/package/package_deb.sh` | `dpkg-deb` from the staged prefix → `packing/deb/codegraph_*.deb` (optional, dpkg Termux) |
 | `scripts/test.sh`     | PASS/FAIL/SKIP harness: ELF checks, interpreter check, `--version`, `os.cpus()` under proot, fake-file creation, `index`+`status` in a scratch git repo |
 
