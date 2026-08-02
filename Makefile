@@ -100,11 +100,12 @@ batch:
 	done
 
 runtime:
-	@if [ "$(VER)" = "latest" ]; then \
-		./tools/produce-local.sh $(MORE); \
-	else \
-		./tools/produce-local.sh $(VER) $(MORE); \
-	fi
+	@v="$(VER)"; [ "$$v" = "latest" ] && v=""; \
+	for i in 1 2 3; do \
+		if ./tools/produce-local.sh $$v $(MORE); then exit 0; fi; \
+		echo "[runtime] attempt $$i/3 failed, retrying in 3s..."; sleep 3; \
+	done; \
+		echo "[runtime] ERROR: produce failed after 3 attempts"; exit 1
 
 stage:
 	./scripts/build.sh
