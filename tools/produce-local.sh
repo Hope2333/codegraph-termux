@@ -80,7 +80,7 @@ if [[ -n "${CODEGRAPH_TARBALL:-}" ]]; then
 else
 	local_url="https://github.com/colbymchenry/codegraph/releases/download/v${VER}/codegraph-linux-arm64.tar.gz"
 	log "downloading $local_url"
-	curl -fL --retry 3 -o "codegraph-linux-arm64.tar.gz" "$local_url"
+curl -fL --retry 3 --retry-all-errors --retry-delay 2 -o "codegraph-linux-arm64.tar.gz" "$local_url"
 fi
 tar -xzf codegraph-linux-arm64.tar.gz
 RAW="codegraph-linux-arm64"
