@@ -42,6 +42,29 @@ codegraph index
 
 Dependencies (Termux): `pacman -S gcc patchelf proot glibc curl` (or `pkg install …`)
 
+## Install from the hope2333 software source (Termux)
+
+Configure the source (one line):
+
+```sh
+curl -fsSL https://hope2333.github.io/repo/install.sh | sh
+```
+
+Configure + install in one line:
+
+```sh
+curl -fsSL https://hope2333.github.io/repo/install.sh | sh -s -- --install codegraph
+```
+
+Upgrade later:
+
+```sh
+pacman -Syu                    # pacman client
+apt update && apt upgrade     # apt client (mirrorlist package updates via the [hope2333-meta] source)
+```
+
+Details: https://hope2333.github.io/wiki/guides/install.html
+
 ## How it works
 
 ```
