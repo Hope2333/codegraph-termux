@@ -1,155 +1,136 @@
-#!/data/data/com.termux/files/usr/bin/bash
-# gen-flat-packages.sh — regenerate + upload the flat APT Packages.gz for this
-# repo's rolling release, then verify it through the same channel apt consumes.
-#
-# Chain: list release .deb assets (gh api) -> download each (octet-stream) ->
-# index (tools/gen_flat_packages.py, single-version doctrine) -> gzip -9n ->
-# gh release upload --clobber -> re-download + assert.
-#
-# Usage: tools/gen-flat-packages.sh [TAG]
-#   TAG defaults to $TAG env, else Push260803 (this repo's rolling release).
-# Env knobs:
-#   REPO        override owner/slug (derived from origin URL by default)
-#   KEEP_DEBS=1 keep downloaded .debs in the temp dir (debug)
-#
-# DOWNLOAD CHANNELS (network-midbox survival):
-#   1) `GODEBUG=http2client=0 gh api ... -H 'Accept: application/octet-stream'`
-#      — forces gh's Go HTTP client onto HTTP/1.1. The midbox on some networks
-#      kills long HTTP/2 streams with "stream error: PROTOCOL_ERROR" (observed
-#      on 33-40MB release assets); HTTP/1.1 streams complete.
-#   2) fallback: signed CDN redirect (tiny probe against api.github.com with
-#      the gh token) + `curl --http1.1 -C -` against
-#      release-assets.githubusercontent.com. Raw curl against github.com
-#      itself is NEVER used (known to be cut mid-stream).
+#!/usr/bin/env bash
 set -euo pipefail
 
-REPO_FALLBACK="Hope2333/codegraph-termux"
-TAG="${1:-${TAG:-Push260803}}"
-HERE="$(cd "$(dirname "$0")" && pwd)"
-PY="$HERE/gen_flat_packages.py"
+# gen-flat-packages.sh — generate Packages.gz from a GitHub release's .deb assets.
+# Self-contained: derives REPO from git remote, fetches release asset metadata,
+# extracts control info from tiny range requests, generates Packages.gz, uploads.
+#
+# Usage: ./tools/gen-flat-packages.sh [TAG]
+#   TAG defaults to the latest release tag.
 
-fail() { printf 'FATAL: %s\n' "$*" >&2; exit 1; }
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+PYTHON="${PYTHON:-python3}"
 
-for bin in gh python3 gzip git curl; do
-  command -v "$bin" >/dev/null 2>&1 || fail "missing dependency: $bin"
-done
-[ -f "$PY" ] || fail "missing $PY"
+# Derive REPO_SLUG from git remote
+REMOTE_URL="$(git -C "$REPO_DIR" remote get-url origin 2>/dev/null || true)"
+REPO_SLUG="$(echo "$REMOTE_URL" | sed -E 's#.*github\.com[:/]##; s#\.git$##')"
+if [ -z "$REPO_SLUG" ]; then
+    echo "ERROR: cannot determine repo slug from remote" >&2
+    exit 1
+fi
+echo "REPO: $REPO_SLUG"
 
-# --- repo slug: derive from origin URL of THIS repo (script-location anchored,
-# never the caller's cwd), hardcode fallback ---------------------------------
-REPO_ROOT="$(cd "$HERE/.." && pwd)"
-origin_url="$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null || true)"
-REPO="${REPO:-$(printf '%s' "$origin_url" | sed -E 's#.*github\.com[:/]##; s#\.git$##')}"
-case "$REPO" in */*) ;; *) REPO="$REPO_FALLBACK";; esac
-[ -n "$REPO" ] || REPO="$REPO_FALLBACK"
-echo "REPO=$REPO TAG=$TAG"
+# Resolve tag
+TAG="${1:-}"
+if [ -z "$TAG" ]; then
+    TAG="$(gh release list --repo "$REPO_SLUG" --limit 1 --json tagName --jq '.[0].tagName')"
+    if [ -z "$TAG" ]; then
+        echo "ERROR: no releases found" >&2
+        exit 1
+    fi
+fi
+echo "TAG: $TAG"
 
-# --- release status: prerelease/latest resolution ---------------------------
-status="$(gh release view "$TAG" --repo "$REPO" --json tagName,isPrerelease,isDraft)" \
-  || fail "release $TAG not found in $REPO"
-pre="$(printf '%s' "$status" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(str(d["isPrerelease"]).lower())')"
-latest_tag="$(gh api "repos/$REPO/releases/latest" --jq .tag_name 2>/dev/null || true)"
-echo "RELEASE: tag=$TAG prerelease=$pre; /releases/latest resolves to ${latest_tag:-<none>}"
-pinned_url="https://github.com/$REPO/releases/download/$TAG/Packages.gz"
-alias_url="https://github.com/$REPO/releases/latest/download/Packages.gz"
-echo "CANDIDATE pinned-tag URL:  $pinned_url"
-echo "CANDIDATE latest-alias URL: $alias_url"
-if [ "$latest_tag" = "$TAG" ]; then
-  apt_url="$alias_url"
-  echo "APT-URL-CORRECT: latest-alias (latest resolves to $TAG; not a prerelease)"
+# Check prerelease status
+PRERELEASE="$(gh release view "$TAG" --repo "$REPO_SLUG" --json isPrerelease --jq '.isPrerelease')"
+echo "isPrerelease: $PRERELEASE"
+
+PINNED_URL="https://github.com/$REPO_SLUG/releases/download/$TAG/"
+LATEST_URL="https://github.com/$REPO_SLUG/releases/latest/download/"
+echo ""
+echo "Apt sources line:"
+if [ "$PRERELEASE" = "true" ]; then
+    echo "  deb [trusted=yes] $PINNED_URL ./"
+    echo "  (NOTE: /releases/latest/download/ does NOT resolve to prereleases)"
+    echo "  Correct for apt: $PINNED_URL"
 else
-  apt_url="$pinned_url"
-  echo "APT-URL-CORRECT: pinned-tag (latest resolves to ${latest_tag:-<none>}, NOT $TAG; prereleases are excluded from Latest resolution)"
+    echo "  deb [trusted=yes] $PINNED_URL ./"
+    echo "  Also works:      deb [trusted=yes] $LATEST_URL ./"
+    echo "  (Release is NOT prerelease; /releases/latest/download/ resolves here)"
 fi
-echo "SOURCES LINE: deb [trusted=yes] ${apt_url%Packages.gz} ./"
+echo ""
 
-# --- asset download (dual channel, size-checked) -----------------------------
-fetch_asset() {
-  local aid="$1" asize="$2" dest="$3"
-  if GODEBUG=http2client=0 gh api "repos/$REPO/releases/assets/$aid" \
-      -H 'Accept: application/octet-stream' > "$dest" 2>/dev/null \
-      && [ "$(wc -c < "$dest" | tr -d ' ')" = "$asize" ]; then
-    echo "  channel: gh-api(http1.1)"
-    return 0
-  fi
-  echo "  gh-api channel failed/short — fallback to signed-URL curl(http1.1)"
-  local token loc
-  token="$(gh auth token)" || return 1
-  loc="$(curl -s --http1.1 -o /dev/null -w '%{redirect_url}' \
-    -H "Authorization: token $token" -H 'Accept: application/octet-stream' \
-    "https://api.github.com/repos/$REPO/releases/assets/$aid")"
-  [ -n "$loc" ] || return 1
-  curl -sS --http1.1 --retry 3 --retry-delay 2 -C - -o "$dest" "$loc" || return 1
-  [ "$(wc -c < "$dest" | tr -d ' ')" = "$asize" ] || return 1
-  echo "  channel: signed-url curl(http1.1)"
-  return 0
-}
+# Create temp working dir
+WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/gen-flat-XXXXXX")"
+trap 'rm -rf "$WORKDIR"' EXIT
+echo "WORKDIR: $WORKDIR"
 
-# --- temp workspace ----------------------------------------------------------
-tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/flatpkgs.XXXXXX")"
-trap 'rm -rf "$tmpdir"' EXIT
-state="$tmpdir/state.json"
+# Fetch release assets metadata (id, name, size, digest→sha256)
+echo "Fetching release asset metadata..."
+gh api "repos/$REPO_SLUG/releases/tags/$TAG" --paginate \
+    --jq '.assets[] | select(.name | endswith(".deb")) | "\(.id) \(.name) \(.size) \(.digest | sub("^sha256:"; ""))"' \
+    > "$WORKDIR/assets.txt"
 
-# --- list .deb assets --------------------------------------------------------
-gh api "repos/$REPO/releases/tags/$TAG" --paginate \
-  --jq '.assets[] | select(.name | endswith(".deb")) | "\(.id)\t\(.name)\t\(.size)"' \
-  > "$tmpdir/assets.tsv" || fail "failed to list assets of $TAG"
-deb_count="$(wc -l < "$tmpdir/assets.tsv" | tr -d ' ')"
-[ "$deb_count" -ge 1 ] || fail "no .deb assets on release $TAG — nothing to index"
-echo "ASSETS: $deb_count .deb file(s) on $TAG"
+DEB_COUNT="$(wc -l < "$WORKDIR/assets.txt" | tr -d ' ')"
+echo "Found $DEB_COUNT .deb assets"
 
-# --- download + index + delete, one deb at a time (disk hygiene) -------------
-while IFS=$'\t' read -r aid aname asize; do
-  [ -n "$aid" ] || continue
-  dest="$tmpdir/$aname"
-  echo "DOWNLOAD $aname ($asize bytes)"
-  fetch_asset "$aid" "$asize" "$dest" || fail "asset download failed: $aname"
-  python3 "$PY" add --deb "$dest" --state "$state" || fail "index add failed: $aname"
-  if [ "${KEEP_DEBS:-0}" = "1" ]; then
-    echo "  indexed (kept: KEEP_DEBS=1)"
-  else
-    rm -f "$dest"
-    echo "  indexed + deleted"
-  fi
-done < "$tmpdir/assets.tsv"
-
-# --- finalize: single-version filter + gzip -9n + guards ---------------------
-out="$tmpdir/Packages.gz"
-if ! python3 "$PY" finalize --state "$state" --out "$out" > "$tmpdir/finalize.log" 2>&1; then
-  cat "$tmpdir/finalize.log" >&2
-  fail "finalize failed"
+if [ "$DEB_COUNT" -lt 1 ]; then
+    echo "ERROR: no .deb assets in release $TAG" >&2
+    exit 1
 fi
-cat "$tmpdir/finalize.log"
-entries="$(sed -n 's/^PACKAGES_INDEX .* entries=\([0-9]*\) bytes=.*/\1/p' "$tmpdir/finalize.log")"
-[ -n "$entries" ] && [ "$entries" -ge 1 ] || fail "guard: zero-entry index — refusing to upload"
-[ -s "$out" ] || fail "guard: empty Packages.gz — refusing to upload"
-grep '^ENTRY ' "$tmpdir/finalize.log" > "$tmpdir/expected.tsv" || true
 
-# --- upload (--clobber) ------------------------------------------------------
-gh release upload "$TAG" "$out" --repo "$REPO" --clobber \
-  || fail "gh release upload failed"
-echo "UPLOADED Packages.gz -> release $TAG (--clobber)"
+# Show asset list
+echo "Assets:"
+while read -r LINE; do
+    AID="$(echo "$LINE" | awk '{print $1}')"
+    ANAME="$(echo "$LINE" | awk '{print $2}')"
+    ASIZE="$(echo "$LINE" | awk '{print $3}')"
+    echo "  $ANAME ($ASIZE bytes, asset $AID)"
+done < "$WORKDIR/assets.txt"
 
-# --- verify: re-download via gh api (same content the apt URL serves) --------
-pkg_id="$(gh api "repos/$REPO/releases/tags/$TAG" --paginate \
-  --jq '.assets[] | select(.name == "Packages.gz") | .id' | head -n1)"
-[ -n "$pkg_id" ] || fail "Packages.gz asset not found after upload"
-GODEBUG=http2client=0 gh api "repos/$REPO/releases/assets/$pkg_id" \
-  -H 'Accept: application/octet-stream' > "$tmpdir/Packages.gz.verify" \
-  || fail "verification download failed"
-if ! python3 "$PY" inspect "$tmpdir/Packages.gz.verify" > "$tmpdir/inspect.log" 2>&1; then
-  cat "$tmpdir/inspect.log" >&2
-  fail "verification parse failed"
+# Generate Packages.gz (release mode — downloads only tiny control.tar, not full debs)
+PACKAGES_OUT="$WORKDIR/Packages.gz"
+echo ""
+echo "Generating Packages.gz (release mode — range requests for control headers only)..."
+$PYTHON "$SCRIPT_DIR/gen_flat_packages.py" release \
+    --repo "$REPO_SLUG" \
+    --tag "$TAG" \
+    --assets-file "$WORKDIR/assets.txt" \
+    --out "$PACKAGES_OUT"
+
+# Guard: assert valid
+ENTRY_COUNT="$(zcat "$PACKAGES_OUT" | grep -c '^Package:' || true)"
+FILE_SIZE="$(stat -c%s "$PACKAGES_OUT" 2>/dev/null || stat -f%z "$PACKAGES_OUT")"
+if [ "$ENTRY_COUNT" -lt 1 ] || [ "$FILE_SIZE" -lt 1 ]; then
+    echo "ERROR: Packages.gz invalid (entries=$ENTRY_COUNT, size=$FILE_SIZE)" >&2
+    exit 1
 fi
-cat "$tmpdir/inspect.log"
-vcount="$(sed -n 's/^PACKAGES_INDEX .* entries=\([0-9]*\).*/\1/p' "$tmpdir/inspect.log")"
-[ "$vcount" = "$entries" ] || fail "entry count drift: generated=$entries verified=$vcount"
-while IFS=$'\t' read -r vpkg vfile; do
-  [ -n "$vpkg" ] || continue
-  grep -qF "$(printf '%s\t%s' "$vpkg" "$vfile")" "$tmpdir/expected.tsv" \
-    || fail "verification mismatch: ($vpkg, $vfile) not in freshly generated manifest"
-done < <(sed -n 's/^ENTRY //p' "$tmpdir/inspect.log")
+echo "Packages.gz: entries=$ENTRY_COUNT, size=$FILE_SIZE bytes"
 
-bytes="$(wc -c < "$out" | tr -d ' ')"
-echo "DONE repo=$REPO tag=$TAG entries=$entries bytes=$bytes"
-echo "APT URL (correct): $apt_url"
+# Copy to repo root for commit
+cp "$PACKAGES_OUT" "$REPO_DIR/Packages.gz"
+
+# Upload to release
+echo "Uploading Packages.gz to release $TAG..."
+gh release upload "$TAG" --repo "$REPO_SLUG" --clobber "$PACKAGES_OUT"
+echo "Upload complete."
+
+# Verify via re-download
+echo ""
+echo "Verifying re-download..."
+VERIFY_DIR="$WORKDIR/verify"
+mkdir -p "$VERIFY_DIR"
+
+# Get Packages.gz asset id and download
+ASSET_ID="$(gh api "repos/$REPO_SLUG/releases/tags/$TAG" --jq '.assets[] | select(.name == "Packages.gz") | .id')"
+gh api "repos/$REPO_SLUG/releases/assets/$ASSET_ID" \
+    -H 'Accept: application/octet-stream' > "$VERIFY_DIR/Packages.gz"
+
+# Validate
+if ! gzip -t "$VERIFY_DIR/Packages.gz" 2>/dev/null; then
+    echo "ERROR: re-downloaded Packages.gz is not valid gzip" >&2
+    exit 1
+fi
+VERIFY_ENTRIES="$(zcat "$VERIFY_DIR/Packages.gz" | grep -c '^Package:' || true)"
+VERIFY_SIZE="$(stat -c%s "$VERIFY_DIR/Packages.gz" 2>/dev/null || stat -f%z "$VERIFY_DIR/Packages.gz")"
+echo "  Re-downloaded: entries=$VERIFY_ENTRIES, size=$VERIFY_SIZE bytes"
+
+# Show Packages content
+echo ""
+echo "=== Packages.gz content ==="
+zcat "$VERIFY_DIR/Packages.gz"
+echo "=== end ==="
+
+echo ""
+echo "DONE: $REPO_SLUG — $ENTRY_COUNT entry, $FILE_SIZE bytes"
